@@ -1,0 +1,1192 @@
+﻿import android.os.Bundle
+import android.util.Log
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.material3.Text
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.net.ServerSocket
+import java.security.MessageDigest
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            val status = remember { mutableStateOf("Waiting for connection...") }
+
+            MaterialTheme {
+                Surface {
+                    Text(text = status.value)
+                }
+            }
+
+            LaunchedEffect(Unit) {
+                withContext(Dispatchers.IO) {
+                    try {
+                        val serverSocket = ServerSocket(8888)
+                        status.value = "Listening on port 8888..."
+
+                        val socket = serverSocket.accept()
+                        status.value = "Client connected: ${socket.inetAddress.hostAddress}"
+
+                        val reader = BufferedReader(InputStreamReader(socket.getInputStream()))
+                        val builder = StringBuilder()
+
+                        var line: String?
+                        var inHeader = true
+                        var expectedChecksum = ""
+                        val headerLines = mutableListOf<String>()
+
+                        while (reader.readLine().also { line = it } != null) {
+                            if (line == "END_HEADER") {
+                                inHeader = false
+                                expectedChecksum = headerLines.find { it.startsWith("CHECKSUM:") }?.split(":")?.getOrNull(1)?.trim() ?: ""
+                                builder.appendLine(line)
+                                continue
+                            }
+
+                            if (inHeader) {
+                                headerLines.add(line ?: "")
+                            }
+
+                            builder.appendLine(line)
+                            if (line == "END_OF_TRANSMISSION") break
+                        }
+
+                        val received = builder.toString()
+                        val body = received.substringAfter("END_HEADER\n")
+                        val actualChecksum = sha256Hex(body)
+
+                        if (actualChecksum.equals(expectedChecksum, ignoreCase = true)) {
+                            status.value = "Received valid parcel (${body.length} chars)"
+                        } else {
+                            status.value = "Checksum mismatch!"
+                        }
+
+                        reader.close()
+                        socket.close()
+                        serverSocket.close()
+                    } catch (e: Exception) {
+                        Log.e("WIFI_SERVER", "Error: ${e.message}", e)
+                        status.value = "Error: ${e.message}".take(60)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun sha256Hex(input: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val hash = digest.digest(input.toByteArray())
+        return hash.joinToString("") { "%02x".format(it) }.uppercase()
+    }
+}
+
+
+
+
+
+private void LoadClipboard()
+        {
+            this.clipboardDataController = new SuperParcel();
+            panel4.Controls.Clear();
+
+            bool found = false;
+
+            // Check if the clipboard contains an image
+            if (Clipboard.ContainsImage())
+            {
+                found = true;
+                Image? image = Clipboard.GetImage();
+                if (image != null)
+                {
+                    // Convert image to PNG byte array
+                    using (MemoryStream ms = new MemoryStream())
+                    {
+                        image.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+                        byte[] imageData = ms.ToArray();
+                        clipboardDataController.AddItem("image/png", imageData);
+                    }
+
+                    PictureBox pictureBox = new PictureBox
+                    {
+                        Image = image,
+                        SizeMode = PictureBoxSizeMode.Zoom,
+                        Dock = DockStyle.Fill,
+                        AutoSize = true
+                    };
+
+                    panel4.Controls.Add(pictureBox);
+                }
+            }
+
+            // Check if the clipboard contains text
+            if (Clipboard.ContainsText())
+            {
+                found = true;
+                string clipboardText = Clipboard.GetText();
+                clipboardDataController.AddItem("text/plain", clipboardText);
+
+                Panel container = new Panel
+                {
+                    //BackColor = Color.LightGray,
+                    BackColor = Color.FromArgb(255, 30, 30, 30),
+                    Padding = new Padding(5),
+                    Margin = new Padding(5),
+                    AutoSize = true,
+                    AutoSizeMode = AutoSizeMode.GrowAndShrink
+                };
+
+                Label label = new Label
+                {
+                    Text = clipboardText,
+                    AutoSize = true,
+                    ForeColor = Color.White
+                };
+
+                container.Controls.Add(label);
+                panel4.Controls.Add(container);
+            }
+
+            if (!found)
+            {
+                Label label = new Label
+                {
+                    Text = "Nothing in Clipboard...",
+                    FlatStyle = FlatStyle.Flat,
+                    TextAlign = ContentAlignment.MiddleCenter,
+                    AutoSize = true,
+                    ForeColor = Color.CadetBlue,
+                };
+
+                panel4.Controls.Add(label);
+            }
+        }
+
+
+
+
+
+
+
+
+
+
+
+
+
+        
+
+
+
+
+
+
+
+
+
+
+
+
+// Updated MobileConnection with basic connection lifecycle + async send support
+using InTheHand.Net.Sockets;
+using InTheHand.Net.Bluetooth;
+using System;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace SuperUtils
+{
+    internal class MobileConnection : IDisposable
+    {
+        private static MobileConnection _instance;
+        private BluetoothClient _client;
+        private Stream _stream;
+
+        private const int ChunkSize = 1024;
+
+        public static MobileConnection Instance => _instance ??= new MobileConnection();
+
+        public bool IsConnected => _client?.Connected ?? false;
+
+        public static void Init()
+        {
+            _instance = new MobileConnection();
+        }
+
+        public async Task<bool> ConnectToPhoneAsync(string deviceName)
+        {
+            _client = new BluetoothClient();
+
+            var pairedDevices = _client.DiscoverDevices();
+            var phoneDevice = pairedDevices.FirstOrDefault(d => d.DeviceName == deviceName);
+
+            if (phoneDevice == null)
+                return false;
+
+            Guid serviceClass = BluetoothService.SerialPort;
+
+            try
+            {
+                await Task.Run(() => _client.Connect(phoneDevice.DeviceAddress, serviceClass));
+                _stream = _client.GetStream();
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public async Task<bool> SendParcelAsync(string parcelData)
+        {
+            if (!IsConnected || _stream == null || !_stream.CanWrite)
+                return false;
+
+            byte[] buffer = Encoding.UTF8.GetBytes(parcelData);
+            int total = buffer.Length;
+            int sent = 0;
+
+            try
+            {
+                while (sent < total)
+                {
+                    int chunkLen = Math.Min(ChunkSize, total - sent);
+                    await _stream.WriteAsync(buffer, sent, chunkLen);
+                    sent += chunkLen;
+                    await _stream.FlushAsync();
+                }
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public void Disconnect()
+        {
+            try
+            {
+                _stream?.Close();
+                _client?.Close();
+            }
+            catch { }
+            finally
+            {
+                _stream = null;
+                _client = null;
+            }
+        }
+
+        public void Dispose()
+        {
+            Disconnect();
+        }
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+using System;
+using System.IO;
+using System.Linq;
+using System.Net.Sockets;
+using System.Security.Cryptography;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+
+namespace SuperUtils
+{
+    public class StatusHolder
+    {
+        public bool IsGood { get; }
+        public string Desc { get; }
+        public Color Color { get; }
+
+        private StatusHolder(bool good, string desc)
+        {
+            IsGood = good;
+            Desc = desc;
+            Color = !IsGood ? Color.Firebrick : Color.LawnGreen;
+        }
+
+        public static StatusHolder Good(string description)
+        {
+            return new StatusHolder(true, description);
+        }
+
+        public static StatusHolder Bad(string description)
+        {
+            return new StatusHolder(false, description);
+        }
+    }
+
+    internal class TcpConnectionService : IDisposable
+    {
+        public static StatusHolder WAITING_FOR_CONNECTION = StatusHolder.Good("Trying to connect...");
+        public static StatusHolder CONNECTED_TO_PHONE = StatusHolder.Good("Connected to phone");
+        public static StatusHolder IDLE_PARCEL_STREAM = StatusHolder.Good("Idle parcel stream");
+        public static StatusHolder NO_PARCEL_STREAM = StatusHolder.Bad("No open parcel stream");
+        public static StatusHolder RECEIVING_PARCEL = StatusHolder.Good("Receiving Parcel...");
+        public static StatusHolder SENDING_PARCEL = StatusHolder.Good("Sending Parcel...");
+
+        public static TcpConnectionService Instance => _instance;
+
+        private static TcpConnectionService _instance = new TcpConnectionService();
+
+        private TcpClient client;
+        private Stream socketStream;
+        private Thread clientReceiveThread;
+        private volatile bool isTryingToConnect = false;
+
+        public event Action<StatusHolder> OnConnectionStatusUpdate;
+        public event Action<StatusHolder> OnParcelStatusUpdate;
+        public event Action<int, int> OnParcelProgressUpdate;
+
+        private const int ChunkSize = 1024;
+        private const string DefaultPhoneIP = "10.246.11.82"; // Replace with your phone's IP
+        private const int PhonePort = 8888;
+
+        public bool IsConnected => client?.Connected ?? false;
+
+        private StatusHolder _connectionStatus = WAITING_FOR_CONNECTION;
+        public StatusHolder ConnectionStatus
+        {
+            get { return _connectionStatus; }
+            private set
+            {
+                if (_connectionStatus.Desc != value.Desc)
+                {
+                    _connectionStatus = value;
+                    OnConnectionStatusUpdate.Invoke(value);
+                }
+            }
+        }
+
+        public StatusHolder _parcelStatus = NO_PARCEL_STREAM;
+        public StatusHolder ParcelStatus
+        {
+            get { return _parcelStatus; }
+            private set
+            {
+                if (_parcelStatus.Desc != value.Desc)
+                {
+                    _parcelStatus = value;
+                    OnParcelStatusUpdate.Invoke(value);
+                }
+            }
+        }
+
+        public void Init()
+        {
+            AttemptPhoneConnection();
+        }
+
+        private async Task<bool> AttemptPhoneConnection()
+        {
+            if (isTryingToConnect) 
+            {
+                return false;
+            }
+            isTryingToConnect = true;
+
+            DebugConsole.Instance.WriteLine("Attempting to connect....");
+            if (clientReceiveThread != null && clientReceiveThread.IsAlive)
+            {
+                try
+                {
+                    clientReceiveThread.Interrupt(); // Signal thread to stop
+                }
+                catch (Exception e)
+                {
+                    DebugConsole.Instance.WriteLine(e.Message);
+                }
+                clientReceiveThread = null;
+            }
+
+            client?.Close();
+            client = null;
+            socketStream = null;
+
+            // Connect
+            client = new TcpClient();
+            try
+            {
+                await client.ConnectAsync(DefaultPhoneIP, PhonePort);
+                socketStream = client.GetStream();
+                DebugConsole.Instance.WriteLine("Connected to phone");
+
+                ConnectionStatus = CONNECTED_TO_PHONE;
+                ParcelStatus = IDLE_PARCEL_STREAM;
+
+                // Start new receive thread
+                clientReceiveThread = new Thread(() =>
+                {
+                    try
+                    {
+                        DebugConsole.Instance.WriteLine("Started Receive thread");
+                        ReceiveParcelLoop();
+                        DebugConsole.Instance.WriteLine("Ended Receive thread");
+                    }
+                    catch (ThreadInterruptedException e)
+                    {
+                        DebugConsole.Instance.WriteLine(e.Message);
+                    }
+                });
+                clientReceiveThread.IsBackground = true;
+                clientReceiveThread.Start();
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ConnectionStatus = StatusHolder.Bad($"Failed to connect to {DefaultPhoneIP}:{PhonePort}");
+                DebugConsole.Instance.WriteLine($"Specific error: Failed to connect to {DefaultPhoneIP}:{PhonePort}{ex.Message}");
+                return false;
+            }
+            finally
+            {
+                isTryingToConnect = false;
+            }
+        }
+        
+        public async Task<Result<string>> SendParcelAsync(string parcelData)
+        {
+            if (!IsConnected || socketStream == null || !socketStream.CanWrite)
+                return Result<string>.Failure("Not connected");
+
+            byte[] buffer = Encoding.UTF8.GetBytes(parcelData);
+            int total = buffer.Length;
+            int sent = 0;
+
+            try
+            {
+                while (sent < total)
+                {
+                    int chunkLen = Math.Min(ChunkSize, total - sent);
+                    await socketStream.WriteAsync(buffer, sent, chunkLen);
+                    sent += chunkLen;
+                    await socketStream.FlushAsync();
+
+                    OnParcelProgressUpdate?.Invoke(sent, total);
+                }
+                return Result<string>.Success("Successfully sent data | chars=" + buffer.Length);
+            }
+            catch (Exception e)
+            {
+                return Result<string>.Failure("Error occurred while sending: " + e.Message);
+            }
+        }
+
+        private void ReceiveParcelLoop()
+        {
+            while (true)
+            {
+                if (!IsConnected || socketStream == null || !socketStream.CanRead) {
+                    Thread.Sleep(100);
+                    continue;
+                }
+                try
+                {
+                    string parcelData = ReceiveFullParcel().GetAwaiter().GetResult();
+                    if (!string.IsNullOrWhiteSpace(parcelData))
+                        HandleReceiveParcelString(parcelData);
+                }
+                catch
+                {
+                    return;
+                }
+            }
+        }
+
+        private async Task<string> ReceiveFullParcel()
+        {
+            var sb = new StringBuilder();
+            byte[] buffer = new byte[ChunkSize];
+            int totalReceived = 0;
+
+            while (true)
+            {
+                int bytesRead = await socketStream.ReadAsync(buffer, 0, buffer.Length);
+                if (bytesRead <= 0)
+                    break;
+
+                string chunk = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+                sb.Append(chunk);
+                totalReceived += bytesRead;
+
+                OnParcelProgressUpdate?.Invoke(totalReceived, -1);
+
+                if (sb.ToString().Contains("END_OF_TRANSMISSION"))
+                    break;
+            }
+
+            return sb.ToString();
+        }
+
+        private void HandleReceiveParcelString(string parcelData)
+        {
+            // TODO: Parse into SuperParcel and trigger event
+            // var parcel = SuperParcel.FromParcelString(parcelData);
+            // OnSuperParcelReceive?.Invoke(parcel);
+        }
+
+        public void Refresh()
+        {
+            AttemptPhoneConnection();
+        }
+
+        public void Dispose()
+        {
+            try
+            {
+                try
+                {
+                    clientReceiveThread?.Interrupt();
+                    DebugConsole.Instance.WriteLine("Ended Receive thread");
+                }
+                catch { }
+                socketStream?.Close();
+                client?.Close();
+                DebugConsole.Instance.WriteLine("Closed socket and client");
+
+            }
+            catch { }
+            finally
+            {
+                socketStream = null;
+                client = null;
+            }
+        }
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// Updated MobileConnection with basic connection lifecycle + async send/receive support + progress tracking + checksum verification
+//using InTheHand.Net.Sockets;
+//using InTheHand.Net.Bluetooth;
+//using System;
+//using System.IO;
+//using System.Linq;
+//using System.Security.Cryptography;
+//using System.Text;
+//using System.Threading.Tasks;
+//using System.Diagnostics;
+
+//namespace SuperUtils
+//{
+//    internal class MobileConnection : IDisposable
+//    {
+//        private static MobileConnection _instance = new MobileConnection();
+//        private BluetoothClient _client;
+//        private Stream _stream;
+
+//        private const int ChunkSize = 1024;
+
+//        public static MobileConnection Instance => _instance;
+
+//        public bool IsConnected => _client?.Connected ?? false;
+
+//        public async Task<bool> Init()
+//        {
+//            DebugConsole.Instance.WriteLine("helllllllllloooooooooooooo22222222");
+//            return await this.ConnectToPhoneAsync("Pixel 8a");
+//            //return await this.ConnectToPhoneAsync("Bose QC45");
+//        }
+
+//        // Progress update event
+//        public event Action<int, int> OnProgressUpdate;
+
+//        public async Task<bool> ConnectToPhoneAsync(string deviceName)
+//        {
+//            DebugConsole.Instance.WriteLine("Initializing Bluetooth client...");
+//            _client = new BluetoothClient();
+
+//            try
+//            {
+//                DebugConsole.Instance.WriteLine("Discovering paired devices...");
+//                var pairedDevices = _client.DiscoverDevices();
+
+//                DebugConsole.Instance.WriteLine($"Searching for device with name: {deviceName}");
+//                var phoneDevice = pairedDevices.FirstOrDefault(d => d.DeviceName == deviceName);
+
+//                if (phoneDevice == null)
+//                {
+//                    DebugConsole.Instance.WriteLine("Device not found among paired devices.");
+//                    MessageBox.Show($"Could not find paired device with name '{deviceName}'.",
+//                                    "Connection Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+//                    return false;
+//                }
+
+//                DebugConsole.Instance.WriteLine($"Found device: {phoneDevice.DeviceName} at {phoneDevice.DeviceAddress}");
+//                Guid serviceClass = BluetoothService.SerialPort;
+
+//                DebugConsole.Instance.WriteLine("Attempting to connect to device...");
+//                await Task.Run(() => _client.Connect(phoneDevice.DeviceAddress, serviceClass));
+//                DebugConsole.Instance.WriteLine("Connection successful. Retrieving stream...");
+
+//                _stream = _client.GetStream();
+//                DebugConsole.Instance.WriteLine("Stream successfully acquired.");
+
+//                return true;
+//            }
+//            catch (Exception ex)
+//            {
+//                DebugConsole.Instance.WriteLine($"Exception occurred during connection: {ex}");
+//                MessageBox.Show($"Failed to connect to '{deviceName}':\n\n{ex.Message}",
+//                                "Bluetooth Connection Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+//                return false;
+//            }
+//        }
+
+
+//        public async Task<bool> SendParcelAsync(string parcelData)
+//        {
+//            if (!IsConnected || _stream == null || !_stream.CanWrite)
+//                return false;
+
+//            byte[] buffer = Encoding.UTF8.GetBytes(parcelData);
+//            int total = buffer.Length;
+//            int sent = 0;
+
+//            try
+//            {
+//                while (sent < total)
+//                {
+//                    int chunkLen = Math.Min(ChunkSize, total - sent);
+//                    await _stream.WriteAsync(buffer, sent, chunkLen);
+//                    sent += chunkLen;
+//                    await _stream.FlushAsync();
+
+//                    // Trigger progress event
+//                    OnProgressUpdate?.Invoke(sent, total);
+//                }
+//                return true;
+//            }
+//            catch
+//            {
+//                return false;
+//            }
+//        }
+
+//        public async Task<string> ReceiveParcelAsync()
+//        {
+//            if (!IsConnected || _stream == null || !_stream.CanRead)
+//                return null;
+
+//            MemoryStream memoryStream = new MemoryStream();
+//            byte[] buffer = new byte[ChunkSize];
+//            int totalReceived = 0;
+
+//            try
+//            {
+//                while (true)
+//                {
+//                    int bytesRead = await _stream.ReadAsync(buffer, 0, buffer.Length);
+//                    if (bytesRead <= 0)
+//                        break;
+
+//                    memoryStream.Write(buffer, 0, bytesRead);
+//                    totalReceived += bytesRead;
+
+//                    // Trigger progress update
+//                    OnProgressUpdate?.Invoke(totalReceived, -1); // Unknown total size
+
+//                    string currentData = Encoding.UTF8.GetString(memoryStream.ToArray());
+//                    if (currentData.Contains("END_OF_TRANSMISSION"))
+//                        break;
+//                }
+
+//                return Encoding.UTF8.GetString(memoryStream.ToArray());
+//            }
+//            catch
+//            {
+//                return null;
+//            }
+//        }
+
+//        public bool VerifyChecksum(string parcelData)
+//        {
+//            if (string.IsNullOrWhiteSpace(parcelData))
+//                return false;
+
+//            string[] lines = parcelData.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+//            int headerEndIndex = Array.IndexOf(lines, "END_HEADER");
+//            if (headerEndIndex == -1)
+//                return false;
+
+//            string expectedChecksum = lines.FirstOrDefault(line => line.StartsWith("CHECKSUM:"))?.Split(':')[1]?.Trim();
+//            if (string.IsNullOrWhiteSpace(expectedChecksum))
+//                return false;
+
+//            // Reconstruct body
+//            string body = string.Join("\n", lines.Skip(headerEndIndex + 1));
+
+//            using SHA256 sha = SHA256.Create();
+//            byte[] bodyBytes = Encoding.UTF8.GetBytes(body);
+//            byte[] hashBytes = sha.ComputeHash(bodyBytes);
+//            string actualChecksum = BitConverter.ToString(hashBytes).Replace("-", "");
+
+//            return string.Equals(expectedChecksum, actualChecksum, StringComparison.OrdinalIgnoreCase);
+//        }
+
+//        public void Disconnect()
+//        {
+//            try
+//            {
+//                _stream?.Close();
+//                _client?.Close();
+//            }
+//            catch { }
+//            finally
+//            {
+//                _stream = null;
+//                _client = null;
+//            }
+//        }
+
+//        public void Dispose()
+//        {
+//            Disconnect();
+//        }
+//    }
+//}
+
+
+
+
+
+
+
+
+
+//--------------------------------------------------------------------------------------OLD STRING BASED-----------------------------------------
+//--------------------------------------------------------------------------------------OLD STRING BASED-----------------------------------------
+//--------------------------------------------------------------------------------------OLD STRING BASED-----------------------------------------
+//--------------------------------------------------------------------------------------OLD STRING BASED-----------------------------------------
+//--------------------------------------------------------------------------------------OLD STRING BASED-----------------------------------------
+//--------------------------------------------------------------------------------------OLD STRING BASED-----------------------------------------
+//--------------------------------------------------------------------------------------OLD STRING BASED-----------------------------------------
+//--------------------------------------------------------------------------------------OLD STRING BASED-----------------------------------------
+//--------------------------------------------------------------------------------------OLD STRING BASED-----------------------------------------
+
+//using InTheHand.Net.Sockets;
+//using InTheHand.Net.Bluetooth;
+//using System;
+//using System.IO;
+//using System.Text;
+//using System.Threading.Tasks;
+
+//namespace SuperUtils
+//{
+//    internal class MobileConnection : IDisposable
+//    {
+//        private static MobileConnection _instance;
+
+//        private BluetoothClient _client;
+//        private Stream _stream;
+
+//        public bool IsConnected => _client?.Connected ?? false;
+
+//        public static MobileConnection instance => _instance;
+
+//        internal static void init() {
+//            _instance = new MobileConnection();
+//            _instance.ConnectToPhoneAsync("Pixel 8a");
+//        }
+
+//        public async Task<bool> ConnectToPhoneAsync(string deviceName)
+//        {
+//            _client = new BluetoothClient();
+
+//            var pairedDevices = _client.DiscoverDevices();
+//            var phoneDevice = pairedDevices.FirstOrDefault(d => d.DeviceName == deviceName);
+
+//            if (phoneDevice == null)
+//                return false;
+
+//            // Standard SPP UUID
+//            Guid serviceClass = BluetoothService.SerialPort;
+
+//            try
+//            {
+//                await Task.Run(() => _client.Connect(phoneDevice.DeviceAddress, serviceClass));
+//                _stream = _client.GetStream();
+//                return true;
+//            }
+//            catch
+//            {
+//                return false;
+//            }
+//        }
+
+//        public async Task SendStringAsync(string data)
+//        {
+//            if (_stream == null || !_stream.CanWrite) return;
+
+//            byte[] bytes = Encoding.UTF8.GetBytes(data);
+//            await _stream.WriteAsync(bytes, 0, bytes.Length);
+//        }
+
+//        public async Task<string> ReceiveStringAsync()
+//        {
+//            if (_stream == null || !_stream.CanRead) return null;
+
+//            byte[] buffer = new byte[1024];
+//            int bytesRead = await _stream.ReadAsync(buffer, 0, buffer.Length);
+//            return Encoding.UTF8.GetString(buffer, 0, bytesRead);
+//        }
+
+//        public void Disconnect()
+//        {
+//            _stream?.Close();
+//            _client?.Close();
+//        }
+
+//        public void Dispose()
+//        {
+//            Disconnect();
+//        }
+//    }
+//}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// Updated MobileConnection with basic connection lifecycle + async send/receive support + progress tracking + checksum verification
+//using InTheHand.Net.Sockets;
+//using InTheHand.Net.Bluetooth;
+//using System;
+//using System.IO;
+//using System.Linq;
+//using System.Security.Cryptography;
+//using System.Text;
+//using System.Threading.Tasks;
+//using System.Diagnostics;
+
+//namespace SuperUtils
+//{
+//    internal class MobileConnection : IDisposable
+//    {
+//        private static MobileConnection _instance = new MobileConnection();
+//        private BluetoothClient _client;
+//        private Stream _stream;
+
+//        private const int ChunkSize = 1024;
+
+//        public static MobileConnection Instance => _instance;
+
+//        public bool IsConnected => _client?.Connected ?? false;
+
+//        public async Task<bool> Init()
+//        {
+//            DebugConsole.Instance.WriteLine("helllllllllloooooooooooooo22222222");
+//            return await this.ConnectToPhoneAsync("Pixel 8a");
+//            //return await this.ConnectToPhoneAsync("Bose QC45");
+//        }
+
+//        // Progress update event
+//        public event Action<int, int> OnProgressUpdate;
+
+//        public async Task<bool> ConnectToPhoneAsync(string deviceName)
+//        {
+//            DebugConsole.Instance.WriteLine("Initializing Bluetooth client...");
+//            _client = new BluetoothClient();
+
+//            try
+//            {
+//                DebugConsole.Instance.WriteLine("Discovering paired devices...");
+//                var pairedDevices = _client.DiscoverDevices();
+
+//                DebugConsole.Instance.WriteLine($"Searching for device with name: {deviceName}");
+//                var phoneDevice = pairedDevices.FirstOrDefault(d => d.DeviceName == deviceName);
+
+//                if (phoneDevice == null)
+//                {
+//                    DebugConsole.Instance.WriteLine("Device not found among paired devices.");
+//                    MessageBox.Show($"Could not find paired device with name '{deviceName}'.",
+//                                    "Connection Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+//                    return false;
+//                }
+
+//                DebugConsole.Instance.WriteLine($"Found device: {phoneDevice.DeviceName} at {phoneDevice.DeviceAddress}");
+//                Guid serviceClass = BluetoothService.SerialPort;
+
+//                DebugConsole.Instance.WriteLine("Attempting to connect to device...");
+//                await Task.Run(() => _client.Connect(phoneDevice.DeviceAddress, serviceClass));
+//                DebugConsole.Instance.WriteLine("Connection successful. Retrieving stream...");
+
+//                _stream = _client.GetStream();
+//                DebugConsole.Instance.WriteLine("Stream successfully acquired.");
+
+//                return true;
+//            }
+//            catch (Exception ex)
+//            {
+//                DebugConsole.Instance.WriteLine($"Exception occurred during connection: {ex}");
+//                MessageBox.Show($"Failed to connect to '{deviceName}':\n\n{ex.Message}",
+//                                "Bluetooth Connection Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+//                return false;
+//            }
+//        }
+
+
+//        public async Task<bool> SendParcelAsync(string parcelData)
+//        {
+//            if (!IsConnected || _stream == null || !_stream.CanWrite)
+//                return false;
+
+//            byte[] buffer = Encoding.UTF8.GetBytes(parcelData);
+//            int total = buffer.Length;
+//            int sent = 0;
+
+//            try
+//            {
+//                while (sent < total)
+//                {
+//                    int chunkLen = Math.Min(ChunkSize, total - sent);
+//                    await _stream.WriteAsync(buffer, sent, chunkLen);
+//                    sent += chunkLen;
+//                    await _stream.FlushAsync();
+
+//                    // Trigger progress event
+//                    OnProgressUpdate?.Invoke(sent, total);
+//                }
+//                return true;
+//            }
+//            catch
+//            {
+//                return false;
+//            }
+//        }
+
+//        public async Task<string> ReceiveParcelAsync()
+//        {
+//            if (!IsConnected || _stream == null || !_stream.CanRead)
+//                return null;
+
+//            MemoryStream memoryStream = new MemoryStream();
+//            byte[] buffer = new byte[ChunkSize];
+//            int totalReceived = 0;
+
+//            try
+//            {
+//                while (true)
+//                {
+//                    int bytesRead = await _stream.ReadAsync(buffer, 0, buffer.Length);
+//                    if (bytesRead <= 0)
+//                        break;
+
+//                    memoryStream.Write(buffer, 0, bytesRead);
+//                    totalReceived += bytesRead;
+
+//                    // Trigger progress update
+//                    OnProgressUpdate?.Invoke(totalReceived, -1); // Unknown total size
+
+//                    string currentData = Encoding.UTF8.GetString(memoryStream.ToArray());
+//                    if (currentData.Contains("END_OF_TRANSMISSION"))
+//                        break;
+//                }
+
+//                return Encoding.UTF8.GetString(memoryStream.ToArray());
+//            }
+//            catch
+//            {
+//                return null;
+//            }
+//        }
+
+//        public bool VerifyChecksum(string parcelData)
+//        {
+//            if (string.IsNullOrWhiteSpace(parcelData))
+//                return false;
+
+//            string[] lines = parcelData.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+//            int headerEndIndex = Array.IndexOf(lines, "END_HEADER");
+//            if (headerEndIndex == -1)
+//                return false;
+
+//            string expectedChecksum = lines.FirstOrDefault(line => line.StartsWith("CHECKSUM:"))?.Split(':')[1]?.Trim();
+//            if (string.IsNullOrWhiteSpace(expectedChecksum))
+//                return false;
+
+//            // Reconstruct body
+//            string body = string.Join("\n", lines.Skip(headerEndIndex + 1));
+
+//            using SHA256 sha = SHA256.Create();
+//            byte[] bodyBytes = Encoding.UTF8.GetBytes(body);
+//            byte[] hashBytes = sha.ComputeHash(bodyBytes);
+//            string actualChecksum = BitConverter.ToString(hashBytes).Replace("-", "");
+
+//            return string.Equals(expectedChecksum, actualChecksum, StringComparison.OrdinalIgnoreCase);
+//        }
+
+//        public void Disconnect()
+//        {
+//            try
+//            {
+//                _stream?.Close();
+//                _client?.Close();
+//            }
+//            catch { }
+//            finally
+//            {
+//                _stream = null;
+//                _client = null;
+//            }
+//        }
+
+//        public void Dispose()
+//        {
+//            Disconnect();
+//        }
+//    }
+//}
+
+
+
+
+
+
+
+
+
+
+
+
+//using InTheHand.Net.Sockets;
+//using InTheHand.Net.Bluetooth;
+//using System;
+//using System.IO;
+//using System.Text;
+//using System.Threading.Tasks;
+
+//namespace SuperUtils
+//{
+//    internal class MobileConnection : IDisposable
+//    {
+//        private static MobileConnection _instance;
+
+//        private BluetoothClient _client;
+//        private Stream _stream;
+
+//        public bool IsConnected => _client?.Connected ?? false;
+
+//        public static MobileConnection instance => _instance;
+
+//        internal static void init() {
+//            _instance = new MobileConnection();
+//            _instance.ConnectToPhoneAsync("Pixel 8a");
+//        }
+
+//        public async Task<bool> ConnectToPhoneAsync(string deviceName)
+//        {
+//            _client = new BluetoothClient();
+
+//            var pairedDevices = _client.DiscoverDevices();
+//            var phoneDevice = pairedDevices.FirstOrDefault(d => d.DeviceName == deviceName);
+
+//            if (phoneDevice == null)
+//                return false;
+
+//            // Standard SPP UUID
+//            Guid serviceClass = BluetoothService.SerialPort;
+
+//            try
+//            {
+//                await Task.Run(() => _client.Connect(phoneDevice.DeviceAddress, serviceClass));
+//                _stream = _client.GetStream();
+//                return true;
+//            }
+//            catch
+//            {
+//                return false;
+//            }
+//        }
+
+//        public async Task SendStringAsync(string data)
+//        {
+//            if (_stream == null || !_stream.CanWrite) return;
+
+//            byte[] bytes = Encoding.UTF8.GetBytes(data);
+//            await _stream.WriteAsync(bytes, 0, bytes.Length);
+//        }
+
+//        public async Task<string> ReceiveStringAsync()
+//        {
+//            if (_stream == null || !_stream.CanRead) return null;
+
+//            byte[] buffer = new byte[1024];
+//            int bytesRead = await _stream.ReadAsync(buffer, 0, buffer.Length);
+//            return Encoding.UTF8.GetString(buffer, 0, bytesRead);
+//        }
+
+//        public void Disconnect()
+//        {
+//            _stream?.Close();
+//            _client?.Close();
+//        }
+
+//        public void Dispose()
+//        {
+//            Disconnect();
+//        }
+//    }
+//}
